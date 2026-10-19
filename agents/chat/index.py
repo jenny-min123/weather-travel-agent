@@ -26,6 +26,7 @@ from agents import Agent, OpenAIChatCompletionsModel, Runner
 from .._logger import create_logger
 from .._tools import (
     get_hourly_forecast,
+    get_route_weather,
     get_travel_advice,
     get_weather,
     text_statistics,
@@ -61,8 +62,19 @@ agent = Agent(
         "1. 问「现在/当前天气如何」——调用 get_weather。\n"
         "2. 问「穿什么/要带伞吗/适不适合洗车或运动/有什么出行建议」——调用 get_travel_advice（它已经包含穿衣建议，不要再单独找穿衣工具）。\n"
         "3. 问「几点会下雨/未来几小时/逐小时变化」——调用 get_hourly_forecast。\n"
-        "4. 只有翻译文本时才用 translate_text，只有统计字数时才用 text_statistics。\n"
-        "5. 一次回答可以按需组合调用多个工具，但不要为了凑数调用与问题无关的工具。\n"
+        "4. 涉及「从 A 到 B」「开车过去」「坐地铁/公交」「走路去」「沿途/路上天气」——调用 get_route_weather。\n"
+        "5. 只有翻译文本时才用 translate_text，只有统计字数时才用 text_statistics。\n"
+        "6. 一次回答可以按需组合调用多个工具，但不要为了凑数调用与问题无关的工具。\n"
+        "\n"
+        "【get_route_weather 的用法】\n"
+        "· origin 起点、destination 终点都必须从用户话里取：用户说「从北京南站到首都机场」就分别传这两个地名。\n"
+        "· 用户没说起点（例如只问「去首都机场路上会下雨吗」）时，origin 传空字符串 \\\"\\\"，"
+        "系统会用默认城市，并在结果里返回 assumedDefaultCity=true，此时必须在回答开头说明起点是按默认城市算的。\n"
+        "· mode 判定：说到开车/自驾/打车/高速→driving；说到公交/地铁/大巴/坐车去→transit；说到走路/步行/骑车过去→walking；没提就默认 driving。\n"
+        "· 只问一个城市的天气、或只问穿什么，不要用这个工具，用 get_weather / get_travel_advice。\n"
+        "· 如果用户既要沿途天气又要「到了穿什么」，先调 get_route_weather，再按终点城市调 get_travel_advice。\n"
+        "· 返回 error.code 为 TRANSIT_CROSS_CITY 时，如实告诉用户公交接口不支持跨城，建议改用驾车，不要偷偷换成驾车结果。\n"
+        "· 返回 degraded 不为 null 时，说明哪几个采样点没取到天气，不要假装数据齐全。\n"
         "\n"
         "【关于「我这 / 当前位置 / 附近」】\n"
         "本 Agent 无法获取用户真实地理位置。遇到这类说法时：\n"
@@ -88,7 +100,14 @@ agent = Agent(
         "涉及数值时保留工具返回的原值（温度取整、湿度取整、降水量保留一位小数）。"
         "回答控制在 200 字以内，除非用户明确要求详细展开。"
     ),
-    tools=[get_travel_advice, get_weather, get_hourly_forecast, translate_text, text_statistics],
+    tools=[
+        get_travel_advice,
+        get_weather,
+        get_hourly_forecast,
+        get_route_weather,
+        translate_text,
+        text_statistics,
+    ],
     model=llm_model,
 )
 

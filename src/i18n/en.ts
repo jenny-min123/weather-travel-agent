@@ -20,6 +20,7 @@ const en = {
   "tool.weather": "Live weather",
   "tool.hourly": "Hourly",
   "tool.travel": "Travel advice",
+  "tool.route": "Route weather",
   "tool.translate": "Translate",
   "tool.statistics": "Statistics",
 

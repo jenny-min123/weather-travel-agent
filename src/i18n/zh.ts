@@ -20,6 +20,7 @@ const zh = {
   "tool.weather": "实况天气",
   "tool.hourly": "逐小时",
   "tool.travel": "出行建议",
+  "tool.route": "路线沿途",
   "tool.translate": "文本翻译",
   "tool.statistics": "文本统计",
 

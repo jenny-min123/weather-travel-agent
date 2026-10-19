@@ -28,6 +28,7 @@ const LAMP_IDS = [
   'get_weather',
   'get_hourly_forecast',
   'get_travel_advice',
+  'get_route_weather',
   'translate_text',
   'text_statistics',
 ] as const;
@@ -35,6 +36,7 @@ const LAMP_ICONS: Record<string, string> = {
   get_weather: '☀️',
   get_hourly_forecast: '⏱️',
   get_travel_advice: '🧳',
+  get_route_weather: '🚗',
   translate_text: '🌐',
   text_statistics: '📊',
 };
@@ -42,6 +44,7 @@ const LAMP_I18N_KEYS: Record<string, string> = {
   get_weather: 'tool.weather',
   get_hourly_forecast: 'tool.hourly',
   get_travel_advice: 'tool.travel',
+  get_route_weather: 'tool.route',
   translate_text: 'tool.translate',
   text_statistics: 'tool.statistics',
 };
