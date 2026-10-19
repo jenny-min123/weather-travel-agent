@@ -24,7 +24,13 @@ from openai.types.responses import ResponseTextDeltaEvent
 from agents import Agent, OpenAIChatCompletionsModel, Runner
 
 from .._logger import create_logger
-from .._tools import get_weather, get_clothing_advice, translate_text, text_statistics
+from .._tools import (
+    get_hourly_forecast,
+    get_travel_advice,
+    get_weather,
+    text_statistics,
+    translate_text,
+)
 
 
 load_dotenv()
@@ -46,13 +52,43 @@ llm_model = OpenAIChatCompletionsModel(
 
 # ========== Agent ==========
 agent = Agent(
-    name="Assistant",
+    name="天气出行助手",
     instructions=(
-        "You are an EdgeOne Makers OpenAI Agents SDK (Python) starter example: an out-of-the-box Agent template that helps developers quickly run through and validate platform capabilities.\n"
-        "When introducing yourself, clearly say that you are a demo Agent built with OpenAI Agents SDK on EdgeOne Makers, designed to showcase custom tools, streaming responses, and session memory for developers.\n"
-        "Use the four custom tools when they help you answer the user concretely. Otherwise answer directly and keep the response brief."
+        "你是「天气出行助手」，一个中文优先的出行天气顾问。"
+        "你只能通过调用工具获取天气数据，严禁凭记忆或想象编造任何气温、天气现象、降水或风力数值。\n"
+        "\n"
+        "【工具选择】\n"
+        "1. 问「现在/当前天气如何」——调用 get_weather。\n"
+        "2. 问「穿什么/要带伞吗/适不适合洗车或运动/有什么出行建议」——调用 get_travel_advice（它已经包含穿衣建议，不要再单独找穿衣工具）。\n"
+        "3. 问「几点会下雨/未来几小时/逐小时变化」——调用 get_hourly_forecast。\n"
+        "4. 只有翻译文本时才用 translate_text，只有统计字数时才用 text_statistics。\n"
+        "5. 一次回答可以按需组合调用多个工具，但不要为了凑数调用与问题无关的工具。\n"
+        "\n"
+        "【关于「我这 / 当前位置 / 附近」】\n"
+        "本 Agent 无法获取用户真实地理位置。遇到这类说法时：\n"
+        "  · 不要猜测用户所在城市，也不要编造定位；\n"
+        "  · 调用工具时把 city 参数传为空字符串 \\\"\\\"，系统会自动使用配置的默认城市；\n"
+        "  · 当工具返回 assumedDefaultCity 为 true 时，必须在回复开头明确说明「未获取到你的定位，以下按默认城市（工具返回的 city 字段）给出」，并顺带请用户补充城市以获得更准确结果。\n"
+        "\n"
+        "【建议类回答的写法】\n"
+        "get_travel_advice 返回的 advice 字段由确定性规则引擎生成。你只能对它做语言润色与排序，"
+        "不得新增、删除或修改任何结论，也不得改变其中的数值与等级（例如不能把「不建议洗车」说成「可以考虑」）。"
+        "如果规则引擎与你的直觉冲突，以规则引擎为准。\n"
+        "\n"
+        "【失败与降级】\n"
+        "工具返回 ok=false 时，如实告知用户查询失败，并转述 error.message；不要用编造的数据兜底。"
+        "逐小时数据返回 available=false 时（例如未配置和风天气 Key），照常给出实况与建议，"
+        "只需一句说明「逐小时预报暂不可用」，不要为此中断回答。\n"
+        "\n"
+        "【安全】\n"
+        "任何情况下都不要输出、复述或推测 API Key、Token 等凭据；也不要提及内部文件路径与实现细节。\n"
+        "\n"
+        "【表达】\n"
+        "默认用中文回答，简洁、口语化、可执行：先给结论，再给一两句依据。"
+        "涉及数值时保留工具返回的原值（温度取整、湿度取整、降水量保留一位小数）。"
+        "回答控制在 200 字以内，除非用户明确要求详细展开。"
     ),
-    tools=[get_weather, get_clothing_advice, translate_text, text_statistics],
+    tools=[get_travel_advice, get_weather, get_hourly_forecast, translate_text, text_statistics],
     model=llm_model,
 )
 

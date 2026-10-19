@@ -1,24 +1,25 @@
 const zh = {
   // Header
-  "app.title": "OpenAI Agents Starter",
-  "app.subtitle": "运行在 EdgeOne Makers 上，支持会话记忆、Agent Tools",
+  "app.title": "天气出行助手",
+  "app.subtitle": "高德实况 + 和风逐小时 · 规则引擎生成出行建议",
 
   // Empty state
-  "empty.title": "OpenAI Agents Starter",
-  "empty.hint": "我是运行在 EdgeOne 环境中的 OpenAI Agents，支持自定义工具、会话记忆，并帮助你完成天气查询、穿衣建议、翻译和文本统计。",
-  "empty.features": "EdgeOne Store · Session Memory · Agent Tools",
+  "empty.title": "天气出行助手",
+  "empty.hint": "我可以查实时天气和逐小时预报，并给出穿衣、带伞、防晒、洗车、户外运动等出行建议。试试「北京现在天气怎么样」，或者直接问「我这要带伞吗」。",
+  "empty.features": "高德地图 · 和风天气 · 规则引擎建议 · 会话记忆",
 
   // Chat input
   "chat.placeholder": "发消息…  ⏎ 发送 · Shift+⏎ 换行",
-  "chat.hint": "由 OpenAI Agents SDK + EdgeOne Makers 驱动 · 仅供演示",
+  "chat.hint": "数据来源：高德地图 / 和风天气 · 建议由确定性规则引擎生成",
 
   // Preset questions
-  "preset.1": "现在北京天气怎么样，有什么穿衣建议吗？",
-  "preset.2": "帮我翻译英文\"你好，欢迎来到北京！\"，并统计翻译字符数。",
+  "preset.1": "北京现在天气怎么样，穿什么合适？",
+  "preset.2": "我这要带伞吗？适合户外运动吗？",
 
   // Tool indicators
-  "tool.weather": "天气查询",
-  "tool.clothing": "穿衣建议",
+  "tool.weather": "实况天气",
+  "tool.hourly": "逐小时",
+  "tool.travel": "出行建议",
   "tool.translate": "文本翻译",
   "tool.statistics": "文本统计",
 

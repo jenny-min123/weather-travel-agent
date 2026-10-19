@@ -1,24 +1,25 @@
 const en = {
   // Header
-  "app.title": "OpenAI Agents Starter",
-  "app.subtitle": "Running on EdgeOne Makers with session memory & Agent Tools",
+  "app.title": "Weather Travel Assistant",
+  "app.subtitle": "Amap live + QWeather hourly · rule-engine travel advice",
 
   // Empty state
-  "empty.title": "OpenAI Agents Starter",
-  "empty.hint": "I'm an OpenAI Agent running on EdgeOne with custom tools and session memory. I can help with weather, clothing advice, translation, and text statistics.",
-  "empty.features": "EdgeOne Store · Session Memory · Agent Tools",
+  "empty.title": "Weather Travel Assistant",
+  "empty.hint": "I can look up live weather and hourly forecasts, then give you actionable travel advice — what to wear, whether to bring an umbrella, sun protection, car washing, outdoor sports. Try \"What's the weather in Beijing?\" or just ask \"Do I need an umbrella?\"",
+  "empty.features": "Amap · QWeather · Rule engine · Session memory",
 
   // Chat input
   "chat.placeholder": "Type a message...  ⏎ Send · Shift+⏎ Newline",
-  "chat.hint": "Powered by OpenAI Agents SDK + EdgeOne Makers · Demo only",
+  "chat.hint": "Data: Amap / QWeather · Advice produced by a deterministic rule engine",
 
   // Preset questions
-  "preset.1": "What is the weather like in Beijing now? Any clothing suggestions?",
-  "preset.2": "Translate \"Hello, welcome to Beijing!\" into Chinese and count the characters.",
+  "preset.1": "What's the weather in Beijing right now? What should I wear?",
+  "preset.2": "Do I need an umbrella? Is it good for outdoor sports?",
 
   // Tool indicators
-  "tool.weather": "Weather",
-  "tool.clothing": "Clothing",
+  "tool.weather": "Live weather",
+  "tool.hourly": "Hourly",
+  "tool.travel": "Travel advice",
   "tool.translate": "Translate",
   "tool.statistics": "Statistics",
 
