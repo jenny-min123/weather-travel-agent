@@ -17,6 +17,13 @@ Stage 2 stitches four Amap surfaces into one answer:
                                                                   │
                                                           逐点建议 + 沿途预警
 
+Stage 3 adds time alignment on top of that pipeline:
+
+    出发时刻(+08:00) ──分段累计耗时──▶ 每点到达时刻 ──最近整点──▶ 24h/72h/168h/7d
+                                                                      │
+                                                    命中 → 该点用预报
+                                                    未命中 → 该点回落实况
+
 Design notes:
   * Routing/geocoding use `AMAP_ROUTE_API_KEY`; weather uses
     `AMAP_WEATHER_API_KEY`. Both fall back to each other inside `_config`.
@@ -28,6 +35,9 @@ Design notes:
     a low QPS ceiling and four waypoints already mean up to eight calls.
   * Weather is fetched per **distinct adcode**, so a route that stays inside
     one district costs exactly one weather call.
+  * Stage 3 keeps every failure local to one waypoint: forecast lookup is
+    wrapped per point, and only points that could *not* get a forecast pay for
+    a live call. `ROUTE_FORECAST_ENABLED=false` restores stage 2 exactly.
 """
 
 from __future__ import annotations
@@ -46,11 +56,33 @@ from ._amap import (
     sample_route_points,
     weather_live,
 )
-from ._config import default_city, route_sample_points, route_weather_enabled
+from ._config import (
+    default_city,
+    route_forecast_enabled,
+    route_forecast_tolerance_min,
+    route_sample_points,
+    route_weather_enabled,
+)
+from ._qweather import forecast_at
+from ._timealign import (
+    TZ_NAME,
+    arrival_offsets,
+    arrival_times,
+    format_clock,
+    format_iso,
+    local_now,
+    parse_fx_time,
+)
 
 SUPPORTED_MODES = ("driving", "transit", "walking")
 _MODE_ZH = {"driving": "驾车", "transit": "公交", "walking": "步行"}
 _MAX_CONCURRENCY = 3
+#: QWeather's personal-key ceiling is lower than Amap's; keep it tighter so a
+#: burst of four waypoints never looks like abuse.
+_FORECAST_CONCURRENCY = 2
+
+#: Shown verbatim to the user (and required in the answer by the instructions).
+TIME_DISCLAIMER = "预估时间基于当前路况计算，实际到达时间可能因拥堵延后，请谨慎参考。"
 
 _RAIN_MARKERS = ("雨", "雪", "冰粒", "冰雹")
 
@@ -254,6 +286,60 @@ async def _sample_one(
     return entry
 
 
+# ========== 逐点预报（阶段三） ==========
+async def _forecast_one(
+    sample: dict,
+    arrival,
+    departure,
+    semaphore: asyncio.Semaphore,
+    tolerance_min: int,
+) -> None:
+    """
+    Attach the stage-3 fields to one waypoint, in place.
+
+    Deliberately defensive: a broken upstream, a bad `fxTime`, or anything else
+    must only cost *this* point its forecast. The caller then falls back to live
+    conditions for this point alone, and the other three still render.
+    """
+    sample["arrivalTime"] = format_iso(arrival)
+    sample["arrivalOffsetMin"] = round(max((arrival - departure).total_seconds(), 0) / 60.0, 1)
+    sample["forecastStatus"] = "unavailable"
+    sample["forecastTier"] = ""
+    sample["forecastTime"] = ""
+    sample["forecastDeltaMin"] = None
+    sample["forecastError"] = None
+
+    try:
+        # The waypoint's own coordinates, rounded to the two decimals QWeather
+        # accepts — no extra city-lookup call, and the forecast is point-level.
+        location = f"{sample['longitude']:.2f},{sample['latitude']:.2f}"
+        outcome = await forecast_at(
+            location,
+            arrival,
+            semaphore=semaphore,
+            tolerance_min=tolerance_min,
+        )
+    except Exception as exc:  # noqa: BLE001 — isolation is the whole point
+        sample["forecastStatus"] = "fallback_to_live"
+        sample["forecastError"] = f"{type(exc).__name__}: {exc}"
+        return
+
+    sample["forecastStatus"] = outcome.get("status") or "unavailable"
+    sample["forecastTier"] = outcome.get("tier") or ""
+    sample["forecastTime"] = outcome.get("time") or ""
+    sample["forecastDeltaMin"] = outcome.get("deltaMin")
+    sample["forecastError"] = outcome.get("error")
+
+    weather = outcome.get("weather")
+    if weather:
+        sample["weather"] = weather
+
+    if sample["forecastStatus"] == "unavailable":
+        # No tier covered this moment (or the chain was exhausted) — the caller
+        # will try live conditions and relabel the point if that works.
+        sample["forecastStatus"] = "fallback_to_live"
+
+
 # ========== 逐点天气 ==========
 async def _weather_by_adcode(
     samples: list[dict], semaphore: asyncio.Semaphore
@@ -314,6 +400,26 @@ def _build_alerts(samples: list[dict], route: dict) -> list[str]:
     if len(codes) == 1 and len(samples) > 1:
         alerts.append("整条路线集中在同一区县，沿途天气差异很小")
 
+    # --- 阶段三：按到达时刻的预报预警 ---
+    likely_wet = [
+        s for s in samples
+        if (s.get("weather") or {}).get("pop") is not None
+        and float((s.get("weather") or {}).get("pop") or 0) >= 60
+    ]
+    if likely_wet:
+        where = "、".join(
+            f'{s["role"]}（{format_clock(parse_fx_time(s["forecastTime"])) if parse_fx_time(s.get("forecastTime")) else "到达时"} '
+            f'降水概率 {float(s["weather"]["pop"]):.0f}%）'
+            for s in likely_wet
+        )
+        alerts.append(f"按到达时刻预报，{where}")
+
+    departures = [d for d in (parse_fx_time(s.get("arrivalTime")) for s in samples) if d]
+    if departures and samples:
+        first_day = departures[0].date()
+        if any(moment.date() != first_day for moment in departures):
+            alerts.append(f"行程跨天：预计 {format_clock(departures[-1])} 抵达，注意夜间行车安全")
+
     return alerts
 
 
@@ -344,12 +450,26 @@ def _build_summary(
     for sample in endpoints:
         weather = sample.get("weather") or {}
         place = sample.get("district") or sample.get("city") or sample.get("province") or "未知区域"
+
+        clock = ""
+        moment = parse_fx_time(sample.get("arrivalTime"))
+        if moment is not None:
+            clock = f"，预计 {format_clock(moment)} 到达"
+
+        # A live observation cannot answer "what will it be when I get there" —
+        # say so at the exact place the number is quoted, not only in a footer.
+        fallback_note = ""
+        if sample.get("forecastStatus") == "fallback_to_live":
+            fallback_note = "（超出预报范围，以下为当前实况）"
+
         if weather:
             temp = weather.get("temperature")
             temp_text = f" {temp:.0f}℃" if temp is not None else ""
-            parts.append(f'{sample["role"]}（{place}）{weather.get("weather", "")}{temp_text}；')
+            parts.append(
+                f'{sample["role"]}（{place}）{weather.get("weather", "")}{temp_text}{clock}{fallback_note}；'
+            )
         elif sample.get("error"):
-            parts.append(f'{sample["role"]}（{place}）天气暂缺；')
+            parts.append(f'{sample["role"]}（{place}）天气暂缺{clock}；')
 
     if origin.get("assumedDefaultCity"):
         parts.append(f'起点未指定，按默认城市「{origin["query"]}」计算。')
@@ -421,27 +541,95 @@ async def route_weather(origin: str, destination: str, mode: str = "driving") ->
     )
     samples = list(samples)
 
-    weather_map, weather_errors = await _weather_by_adcode(samples, semaphore)
+    # ---------- 阶段三：为每个采样点算出到达时刻 ----------
+    departure = local_now()
+    forecast_enabled = route_forecast_enabled()
+    tolerance_min = route_forecast_tolerance_min()
+    offsets, basis = arrival_offsets(
+        total_duration_s=route.get("duration_s"),
+        total_distance_m=total_distance_m,
+        ratios=[s["ratio"] for s in samples],
+        step_spans=route.get("step_spans"),
+    )
+    arrivals = arrival_times(departure, offsets)
+
+    if forecast_enabled:
+        # Dedicated semaphore: QWeather's ceiling is tighter than Amap's, and
+        # sharing one would let regeo calls starve the forecast calls.
+        qweather_semaphore = asyncio.Semaphore(_FORECAST_CONCURRENCY)
+        await asyncio.gather(
+            *(
+                _forecast_one(sample, arrivals[index], departure, qweather_semaphore, tolerance_min)
+                for index, sample in enumerate(samples)
+            )
+        )
+    else:
+        # Kill switch: keep the useful arrival clock, skip every forecast call.
+        for index, sample in enumerate(samples):
+            sample["arrivalTime"] = format_iso(arrivals[index])
+            sample["arrivalOffsetMin"] = round(offsets[index] / 60.0, 1)
+            sample["forecastStatus"] = "disabled"
+            sample["forecastTier"] = ""
+            sample["forecastTime"] = ""
+            sample["forecastDeltaMin"] = None
+            sample["forecastError"] = None
+
+    # ---------- 实况兜底：只为没拿到预报的点付请求 ----------
+    pending = [sample for sample in samples if not sample.get("weather")]
+    weather_map, weather_errors = await _weather_by_adcode(pending, semaphore)
+
     for sample in samples:
+        if sample.get("weather"):
+            sample["weatherBasis"] = "forecast"
+            sample["advice"] = _brief_advice(build_advice(sample["weather"], None))
+            continue
+
         code = sample.get("adcode", "")
         if not code:
+            if forecast_enabled:
+                sample["forecastStatus"] = "unavailable"
             if not sample.get("error"):
                 sample["error"] = "该采样点未能解析出行政区，已跳过天气查询"
             continue
+
         data = weather_map.get(code)
         if data:
             sample["weather"] = data
+            sample["weatherBasis"] = "live"
             sample["advice"] = _brief_advice(build_advice(data, None))
+            if forecast_enabled:
+                sample["forecastStatus"] = "fallback_to_live"
+                if not sample.get("forecastError"):
+                    sample["forecastError"] = "预报未覆盖该时刻，已改用当前实况"
         else:
+            if forecast_enabled:
+                sample["forecastStatus"] = "unavailable"
             sample["error"] = f"天气查询失败：{weather_errors.get(code, '未知原因')}"
 
     covered = sum(1 for s in samples if s.get("weather"))
+    missing_points = [s["role"] for s in samples if not s.get("weather")]
+    fallback_points = [s["role"] for s in samples if s.get("forecastStatus") == "fallback_to_live"]
+    aligned_points = sum(
+        1 for s in samples if s.get("forecastStatus") in ("hourly", "daily_fallback")
+    )
+
     degraded = None
-    if covered < len(samples):
+    reasons: list[str] = []
+    if missing_points:
+        reasons.append(f"{len(missing_points)} 个采样点未能取到天气")
+    if fallback_points:
+        reasons.append(f"{len(fallback_points)} 个采样点未能按到达时刻取到预报，已改报当前实况")
+    if reasons:
         degraded = {
-            "reason": f"{len(samples) - covered} 个采样点未能取到天气，结果不完整",
-            "points": [s["role"] for s in samples if not s.get("weather")],
+            "reason": "，".join(reasons),
+            "points": missing_points,
+            "timeAlignment": bool(fallback_points),
+            "fallbackPoints": fallback_points,
         }
+
+    summary = _build_summary(samples, route, mode_clean, origin_ep, destination_ep)
+    if forecast_enabled:
+        summary = f"{summary}{TIME_DISCLAIMER}"
 
     return {
         "mode": mode_clean,
@@ -471,10 +659,21 @@ async def route_weather(origin: str, destination: str, mode: str = "driving") ->
         "sampleCount": len(samples),
         "samples": samples,
         "alerts": _build_alerts(samples, {"mode": mode_clean, **route}),
-        "summary": _build_summary(samples, route, mode_clean, origin_ep, destination_ep),
+        "summary": summary,
+        "timeAlignment": {
+            "enabled": forecast_enabled,
+            "timezone": TZ_NAME,
+            "departureAt": format_iso(departure),
+            "arrivalAt": format_iso(arrivals[-1]) if arrivals else "",
+            "basis": basis,
+            "toleranceMin": tolerance_min,
+            "alignedPoints": aligned_points,
+            "fallbackPoints": len(fallback_points),
+        },
+        "timeDisclaimer": TIME_DISCLAIMER,
         "degraded": degraded,
         "source": "amap",
-        "generatedBy": "amap + rule-engine",
+        "generatedBy": "amap + qweather + rule-engine",
     }
 
 

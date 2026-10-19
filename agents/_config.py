@@ -37,6 +37,9 @@ DEFAULT_HOURLY_PROVIDER = "qweather"
 DEFAULT_ROUTE_SAMPLE_POINTS = 4
 ROUTE_SAMPLE_POINTS_MIN = 2
 ROUTE_SAMPLE_POINTS_MAX = 10
+DEFAULT_FORECAST_TOLERANCE_MIN = 90
+FORECAST_TOLERANCE_MIN = 30
+FORECAST_TOLERANCE_MAX = 180
 
 _TRUTHY = {"1", "true", "yes", "on", "y", "t"}
 _FALSY = {"0", "false", "no", "off", "n", "f"}
@@ -128,6 +131,34 @@ def route_sample_points() -> int:
     return max(ROUTE_SAMPLE_POINTS_MIN, min(ROUTE_SAMPLE_POINTS_MAX, n))
 
 
+# ========== 沿途天气时间对齐 (阶段三) ==========
+def route_forecast_enabled() -> bool:
+    """
+    Kill switch for stage 3's time alignment.
+
+    Unset → **on** (it is the current default behaviour). Setting it to any
+    falsy value restores stage 2 exactly — each waypoint reports live
+    conditions — which is the fastest safe rollback if QWeather misbehaves.
+    """
+    value = _raw("ROUTE_FORECAST_ENABLED").lower()
+    if value in _FALSY:
+        return False
+    return True
+
+
+def route_forecast_tolerance_min() -> int:
+    """
+    How far an hourly bucket may sit from the estimated arrival before we
+    escalate to a wider forecast tier. Clamped to 30–180 minutes.
+    """
+    value = _raw("ROUTE_FORECAST_TOLERANCE_MIN")
+    try:
+        minutes = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_FORECAST_TOLERANCE_MIN
+    return max(FORECAST_TOLERANCE_MIN, min(FORECAST_TOLERANCE_MAX, minutes))
+
+
 # ========== Diagnostics ==========
 def mask(secret: str | None) -> str:
     """
@@ -160,6 +191,8 @@ def config_status() -> dict:
         "qweather_host": qweather_host() or "<unset>",
         "route_weather_enabled": route_weather_enabled(),
         "route_sample_points": route_sample_points(),
+        "route_forecast_enabled": route_forecast_enabled(),
+        "route_forecast_tolerance_min": route_forecast_tolerance_min(),
     }
 
 

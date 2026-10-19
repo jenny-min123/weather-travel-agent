@@ -7,7 +7,7 @@ Six tools are exposed to the model:
   │ get_weather            │ 高德 /v3/weather/weatherInfo (extensions=base)│
   │ get_hourly_forecast    │ 和风 /v7/weather/24h 逐小时                   │
   │ get_travel_advice      │ 实况 + 逐小时 → 确定性规则引擎（含穿衣建议）    │
-  │ get_route_weather      │ 路径规划 → 里程等分采样 → 逐点区县天气（阶段二）│
+  │ get_route_weather      │ 路径规划 → 采样 → 各点「到达时刻」天气 + 建议   │
   │ translate_text         │ 模板自带（保留）                              │
   │ text_statistics        │ 模板自带（保留）                              │
   └────────────────────────┴──────────────────────────────────────────────┘
@@ -206,7 +206,7 @@ async def get_travel_advice(
             routeWeather={
                 "enabled": route_weather_enabled(),
                 "samplePoints": route_sample_points(),
-                "stage": "阶段二功能，本阶段仅返回配置状态，不做沿途采样",
+                "stage": "阶段二/三功能，沿途逐点天气请使用 get_route_weather",
             },
             source="rule-engine",
             note=(
@@ -237,8 +237,10 @@ async def get_route_weather(
     ] = "driving",
 ) -> str:
     """
-    规划两地之间的路线，并给出起点、1/3 处、2/3 处、终点的沿途天气与出行建议。
-    适合「从A到B路上天气怎么样」「开车去机场沿途会下雨吗」这类问题。
+    规划两地之间的路线，并给出起点、1/3 处、2/3 处、终点的**到达时刻天气**与出行建议。
+    适合「从A到B路上天气怎么样」「开车去机场沿途会下雨吗」「到那儿的时候冷不冷」这类问题。
+    samples[].arrivalTime 是预计到达该点的时刻，weather 即该时刻的预报；
+    若某点 forecastStatus=fallback_to_live，说明该时刻超出预报范围，返回的是当前实况。
     """
     tool = "get_route_weather"
     try:
@@ -250,6 +252,9 @@ async def get_route_weather(
                 "samples[].advice 由确定性规则引擎产出，结论不可改写；"
                 "alerts 是确定性预警，请如实转述，不要增删。"
                 "若 degraded 不为 null，请在回答中说明哪些采样点缺数据。"
+                "回答沿途天气时必须给出 samples[].arrivalTime 的到达时刻，"
+                "并原样转述 timeDisclaimer：预估时间基于当前路况，实际到达可能因拥堵延后。"
+                "forecastStatus=fallback_to_live 的点必须说明「超出预报范围，以下为当前实况」。"
             ),
         )
     except UpstreamError as exc:

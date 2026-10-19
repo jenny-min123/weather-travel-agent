@@ -371,8 +371,18 @@ async def route_driving(origin: str, destination: str, *, strategy: int = 0) -> 
 
     path = paths[0]
     polyline: list[tuple[float, float]] = []
+    step_spans: list[dict] = []
     for step in path.get("steps") or []:
         polyline.extend(_decode_polyline(step.get("polyline", "")))
+        # Stage 3 needs per-step time to place an arrival clock on each
+        # waypoint: congestion is not uniform, so total-duration × ratio would
+        # put the 2/3 point in the wrong hour on a jammed ring road.
+        step_spans.append(
+            {
+                "distance_m": _to_float(step.get("distance")) or 0.0,
+                "duration_s": _to_float(step.get("duration")) or 0.0,
+            }
+        )
 
     return {
         "origin": origin,
@@ -382,6 +392,7 @@ async def route_driving(origin: str, destination: str, *, strategy: int = 0) -> 
         "toll_m": _to_float(path.get("tolls")) or 0.0,
         "traffic_lights": int(_to_float(path.get("traffic_lights")) or 0),
         "step_count": len(path.get("steps") or []),
+        "step_spans": step_spans,
         "polyline": polyline,
         "source": "amap",
     }
