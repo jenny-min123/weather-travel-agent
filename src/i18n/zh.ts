@@ -62,6 +62,12 @@ const zh = {
   "geo.error.timeout": "⚠️ 定位超时，请重试或手动输入城市",
   "geo.error.unsupported": "⚠️ 当前浏览器不支持定位，请手动输入城市",
   "geo.error.unknown": "⚠️ 定位失败，请手动输入城市",
+  "weatherMeta.district": "区级",
+  "weatherMeta.city": "市级",
+  "weatherMeta.qweather": "和风",
+  "weatherMeta.amap": "高德",
+  "weatherMeta.degraded": "区级不可用，已按城市",
+  "weatherMeta.title": "本条回答的天气数据精度",
 
   // Aria labels (button hover/screen-reader)
   "aria.send": "发送",

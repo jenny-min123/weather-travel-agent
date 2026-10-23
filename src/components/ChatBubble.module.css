@@ -62,6 +62,46 @@
   letter-spacing: .04em;
 }
 
+/* 阶段五：天气数据精度角标（左下角，与右下角时间同一条 footer 线）。
+ * 区级用主题金色，市级用次级灰；降级时改虚线边框，提示"这不是区县数据"。 */
+.metaBadge {
+  position: absolute;
+  bottom: 5px;
+  left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100% - 78px);
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--bg-border);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: .58rem;
+  line-height: 1.5;
+  letter-spacing: .02em;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.metaDot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.metaDistrict {
+  color: var(--accent-gold);
+  border-color: var(--accent-gold);
+}
+.metaCity {
+  color: var(--text-secondary);
+}
+.metaDegraded {
+  border-style: dashed;
+}
+
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }

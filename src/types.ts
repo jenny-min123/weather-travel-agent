@@ -10,6 +10,27 @@ export interface Message {
    * that more content is still streaming. Cleared once done/error fires.
    */
   streaming?: boolean;
+  /**
+   * 阶段五：本条回答所用天气数据的精度档位，由后端 `weather_meta` SSE 事件带下来。
+   * 只用于气泡下角标展示「区级 · 和风」/「市级 · 高德」，不参与推理。
+   */
+  weatherMeta?: WeatherMeta;
+}
+
+/**
+ * Precision badge payload (阶段五).
+ *
+ * `level` is what the data actually is, `provider` is where it came from.
+ * `degraded` is true only when the user asked for a district and the chain fell
+ * back to the prefecture-level city — that is the case the text must announce.
+ */
+export interface WeatherMeta {
+  level: 'district' | 'city';
+  provider: 'qweather' | 'amap' | string;
+  displayName: string;
+  district?: string;
+  city?: string;
+  degraded: boolean;
 }
 
 export interface ToolLampState {

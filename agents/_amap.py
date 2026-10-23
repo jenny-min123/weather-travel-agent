@@ -236,6 +236,24 @@ async def _resolve_adcode(location: str) -> dict:
     )
 
 
+def _pick_live(lives: list[dict], *, prefer_adcode: str = "") -> dict:
+    """
+    Choose one `lives[]` entry.
+
+    A district name is not unique nationally — `city=南山区` answers with **two**
+    entries (广东深圳 440305 and 黑龙江鹤岗 230404), and `lives[0]` depends on
+    Amap's ordering. Whenever we know the adcode we asked for, match on it.
+    """
+    if not lives:
+        return {}
+    code = (prefer_adcode or "").strip()
+    if code:
+        for item in lives:
+            if str(item.get("adcode", "")).strip() == code:
+                return item
+    return lives[0]
+
+
 async def weather_live(city: str) -> dict:
     """
     Current conditions for `city` via `/v3/weather/weatherInfo?extensions=base`.
@@ -244,6 +262,11 @@ async def weather_live(city: str) -> dict:
     GCJ-02**. Coordinates are not understood by the weather endpoint itself — it
     returns `status=1` with an empty `lives[]` — so they are reverse-geocoded to
     an adcode first (see `_resolve_adcode`).
+
+    District-level works only through **adcode or a bare district name**: a
+    composite string like "深圳南山区" answers `count=0` with `status=1`, a silent
+    empty that looks like "no such city". `_place.resolve_place()` is what turns
+    user text into an adcode before it reaches this function.
 
     When the query was a coordinate, the result carries an extra
     `resolvedLocation` block (district / city / formatted address) so the answer
@@ -278,9 +301,20 @@ async def weather_live(city: str) -> dict:
         )
         raise UpstreamError("EMPTY_LIVES", f"高德未返回实况数据（{hint}）")
 
-    live = _normalize_live(lives[0])
+    # Prefer the entry whose adcode we actually asked for (see `_pick_live`).
+    prefer = (
+        str(resolved.get("adcode") or "").strip()
+        if resolved
+        else (query if query.isdigit() and len(query) == 6 else "")
+    )
+    live = _normalize_live(_pick_live(lives, prefer_adcode=prefer))
+    if len(lives) > 1:
+        # Surface the ambiguity instead of hiding it: the caller may want to
+        # print the full province+city name.
+        live["candidateCount"] = len(lives)
     if resolved:
         live["resolvedLocation"] = {
+
             "longitude": point[0] if point else None,
             "latitude": point[1] if point else None,
             "adcode": resolved.get("adcode", ""),
@@ -337,33 +371,8 @@ async def weather_forecast(city: str) -> dict:
 
 
 # ========== 地理编码 ==========
-async def geocode(address: str) -> dict:
-    """
-    Resolve `address` to `{adcode, city, province, longitude, latitude}`.
-
-    Used to (a) align a free-text city with an adcode and (b) hand a
-    longitude/latitude pair to the QWeather hourly endpoint when its own
-    city lookup is unavailable.
-    """
-    address = (address or "").strip()
-    if not address:
-        raise UpstreamError("MISSING_CITY", "未提供地址")
-
-    key = amap_route_key()
-    if not key:
-        raise UpstreamError("MISSING_KEY", "未配置 AMAP_ROUTE_API_KEY")
-
-    payload = await _get_json(
-        URL_GEOCODE,
-        {"key": key, "address": address, "output": "JSON"},
-    )
-    _require_ok(payload, what="地理编码")
-
-    geocodes = payload.get("geocodes") or []
-    if not geocodes:
-        raise UpstreamError("EMPTY_GEOCODE", f"高德无法解析地名「{address}」")
-
-    first = geocodes[0]
+def _normalize_geocode(first: dict, *, address: str) -> dict:
+    """Map one `geocodes[]` entry onto our own field names."""
     location = str(first.get("location", "") or "")
     lon = lat = None
     if "," in location:
@@ -375,12 +384,58 @@ async def geocode(address: str) -> dict:
         "formatted": first.get("formatted_address", ""),
         "province": first.get("province", "") or "",
         "city": first.get("city", "") or "",
+        "district": first.get("district", "") or "",
         "adcode": first.get("adcode", "") or "",
         "level": first.get("level", "") or "",
         "longitude": lon,
         "latitude": lat,
         "source": "amap",
     }
+
+
+async def geocode_all(address: str, *, city: str = "") -> list[dict]:
+    """
+    Resolve `address` to **all** candidates, best first.
+
+    Stage 5 needs the whole list, not just `[0]`: a bare district name like
+    「南山区」 matches both 广东深圳 and 黑龙江鹤岗, and silently taking the first
+    hit is how "深圳南山区" ends up answering with a town in Heilongjiang.
+
+    `city` restricts the search to one city ("南山区" + city="深圳市"), which is
+    the retry path when a composite string fails to resolve in one shot.
+    """
+    address = (address or "").strip()
+    if not address:
+        raise UpstreamError("MISSING_CITY", "未提供地址")
+
+    key = amap_route_key()
+    if not key:
+        raise UpstreamError("MISSING_KEY", "未配置 AMAP_ROUTE_API_KEY")
+
+    params = {"key": key, "address": address, "output": "JSON"}
+    if (city or "").strip():
+        params["city"] = city.strip()
+
+    payload = await _get_json(URL_GEOCODE, params)
+    _require_ok(payload, what="地理编码")
+
+    geocodes = payload.get("geocodes") or []
+    if not geocodes:
+        raise UpstreamError("EMPTY_GEOCODE", f"高德无法解析地名「{address}」")
+
+    return [_normalize_geocode(item, address=address) for item in geocodes]
+
+
+async def geocode(address: str) -> dict:
+    """
+    Resolve `address` to `{adcode, city, province, longitude, latitude}`.
+
+    Kept for the call sites that only need one answer (`_qweather` fallback,
+    route endpoint naming). Precision-sensitive callers should use
+    `geocode_all()`.
+    """
+    return (await geocode_all(address))[0]
+
 
 
 # ========== 驾车路径（阶段二：沿途天气） ==========

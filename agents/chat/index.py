@@ -97,6 +97,19 @@ agent = Agent(
         "当工具返回 assumedDefaultCity 为 true 时，必须在回复开头明确说明「未获取到你的定位，以下按默认城市（工具返回的 city 字段）给出」，"
         "并提示用户可以点输入框左侧的「📍 获取当前位置」按钮授权定位，或者直接说出城市名。\n"
         "\n"
+        "【区县与精度（重要）】\n"
+        "· 用户说到具体区县（「深圳南山区」「北京朝阳区」「浦东新区」）时，把地名原样传给工具，"
+        "不要自己改写成城市名，也不要只传城市；工具会自己解析到区级。\n"
+        "· 结果里的 resolution.level 决定口径：\n"
+        "  - level=district：本次就是**区县级**数据，直接按区县播报（如「广东省深圳市南山区，晴 30℃」），"
+        "绝对不能说「天气接口不支持区级查询」，也不要主动降级成地级市口径。\n"
+        "  - level=city 且 degraded=true：只拿到地级市数据，必须明确说明"
+        "「天气接口暂未取到XX区的区级数据，以下按XX市整体给出」。\n"
+        "  - level=city 且 degraded=false：用户问的就是城市，按城市播报即可。\n"
+        "· resolution.ambiguous=true 时（区名全国重名，如「南山区」「朝阳区」），"
+        "回答必须用 resolution.displayName 的省+市全称，不要只写区名，让用户自己看清是哪一个。\n"
+        "· 不要向用户解释内部接口名、数据源或降级链，只说明地点与精度。\n"
+        "\n"
         "【建议类回答的写法】\n"
         "get_travel_advice 返回的 advice 字段由确定性规则引擎生成。你只能对它做语言润色与排序，"
         "不得新增、删除或修改任何结论，也不得改变其中的数值与等级（例如不能把「不建议洗车」说成「可以考虑」）。"
@@ -131,6 +144,41 @@ agent = Agent(
 def sse_event(event: str, data: dict) -> str:
     """Format a single SSE event."""
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _weather_meta(raw: Any) -> dict | None:
+    """
+    Pull the precision badge out of a weather tool result.
+
+    阶段五 sends `resolution` inside `get_weather` / `get_travel_advice` output so
+    the bubble can show 「区级 · 和风」 / 「市级 · 高德」 without the model having
+    to mention it. Anything that is not a weather payload returns None.
+    """
+    if not isinstance(raw, str):
+        return None
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+
+    resolution = payload.get("resolution")
+    if not isinstance(resolution, dict):
+        return None
+
+    level = str(resolution.get("level", "") or "")
+    if level not in ("district", "city"):
+        return None
+
+    return {
+        "level": level,
+        "provider": str(resolution.get("provider", "") or ""),
+        "displayName": str(resolution.get("displayName", "") or ""),
+        "district": str(resolution.get("district", "") or ""),
+        "city": str(resolution.get("city", "") or ""),
+        "degraded": bool(resolution.get("degraded")),
+    }
 
 
 # ========== Event Stream Generator ==========
@@ -171,6 +219,16 @@ async def _event_stream(
                 if tool_name:
                     logger.log(f"[stream] tool_called: {tool_name}")
                     yield sse_event("tool_called", {"tool": tool_name})
+
+            # 阶段五：天气结果里带 resolution 时，同步一份精度元数据给气泡角标。
+            elif event.name == "tool_output":
+                raw = getattr(event.item, "output", None)
+                if raw is None:
+                    raw = getattr(getattr(event.item, "raw_item", None), "output", None)
+                meta = _weather_meta(raw)
+                if meta:
+                    logger.log(f"[stream] weather_meta: {meta.get('level')}/{meta.get('provider')}")
+                    yield sse_event("weather_meta", meta)
 
 
 # ========== Core Handler ==========

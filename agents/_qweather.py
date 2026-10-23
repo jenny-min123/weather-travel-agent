@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import re
 import time
 from typing import Any
 
@@ -358,6 +359,138 @@ async def hourly_forecast(city: str, hours: int = 12) -> dict:
     }
     _cache_put(_cache, cache_key, result)
     return result
+
+
+# ========== 阶段五：区县级实况 ==========
+NOW_CACHE_TTL = 300.0
+_now_cache: dict[str, tuple[float, Any]] = {}
+
+_OBS_TIME_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?")
+
+
+def _normalize_now(raw: dict) -> dict:
+    """`/v7/weather/now` → our own field names (all optional-safe)."""
+    return {
+        "obsTime": raw.get("obsTime", ""),
+        "temperature": _to_float(raw.get("temp")),
+        "text": raw.get("text", ""),
+        "icon": raw.get("icon", ""),
+        "windDir": raw.get("windDir", ""),
+        "windScale": raw.get("windScale", ""),
+        "windSpeed": _to_float(raw.get("windSpeed")),
+        "humidity": _to_float(raw.get("humidity")),
+        "precip": _to_float(raw.get("precip")),
+        "pressure": _to_float(raw.get("pressure")),
+        "visibility": _to_float(raw.get("vis")),
+        "feelsLike": _to_float(raw.get("feelsLike")),
+        "cloud": _to_float(raw.get("cloud")),
+        "dew": _to_float(raw.get("dew")),
+    }
+
+
+async def weather_now(location: str) -> dict:
+    """
+    District-level live conditions via `/v7/weather/now`.
+
+    `location` is normally a `"lon,lat"` pair (two decimals) taken from the
+    district centroid — QWeather answers with the nearest observation station,
+    which is district-precise (实测「113.93,22.53」命中南山站 101280604).
+    A LocationID also works if a caller already has one.
+
+    Soft failure, like `hourly_forecast`: returns `{"available": False, ...}`
+    so the caller can fall through to Amap instead of failing the turn.
+    """
+    loc = (location or "").strip()
+    if not loc:
+        return {"component": "weather_now", "available": False, "reason": "未提供位置"}
+
+    base = qweather_base_url()
+    key = qweather_key()
+    if not base or not key:
+        return {
+            "component": "weather_now",
+            "available": False,
+            "reason": "未配置 QWEATHER_API_HOST / QWEATHER_API_KEY",
+        }
+
+    cached = _cache_get(_now_cache, loc)
+    if cached is not None:
+        return cached
+
+    try:
+        payload = await _get_json(f"{base}/v7/weather/now", {"location": loc, "key": key})
+    except UpstreamError as exc:
+        return {"component": "weather_now", "available": False, "reason": f"和风天气请求失败：{exc.message}"}
+
+    code = str(payload.get("code", "") or "")
+    if code != _QWEATHER_OK:
+        return {"component": "weather_now", "available": False, "reason": f"和风天气返回错误码 {code or 'UNKNOWN'}"}
+
+    raw = payload.get("now") or {}
+    if not raw:
+        return {"component": "weather_now", "available": False, "reason": "和风天气未返回实况数据"}
+
+    result = {
+        "component": "weather_now",
+        "available": True,
+        "provider": "qweather",
+        "location": loc,
+        "updateTime": payload.get("updateTime", ""),
+        "fxLink": payload.get("fxLink", ""),
+        "now": _normalize_now(raw),
+    }
+    _cache_put(_now_cache, loc, result, ttl=NOW_CACHE_TTL)
+    return result
+
+
+def _reporttime(obs_time: str) -> str:
+    """
+    QWeather `2026-10-23T15:48+08:00` → `2026-10-23 15:48:00`.
+
+    `_advice._report_hour()` matches `\\b\\d{2}:\\d{2}:\\d{2}\\b` to tell day from
+    night (sun-protection advice depends on it), so the seconds field is not
+    optional.
+    """
+    match = _OBS_TIME_RE.match((obs_time or "").strip())
+    if not match:
+        return ""
+    year, month, day, hour, minute, second = match.groups()
+    return f"{year}-{month}-{day} {hour}:{minute}:{second or '00'}"
+
+
+def now_to_live(now_result: dict, *, province: str = "", city: str = "", district: str = "", adcode: str = "") -> dict:
+    """
+    QWeather `now` → the Amap-shaped `live` dict `_advice.build_advice()` expects.
+
+    Field-name translation matters here: `_advice` reads `temperature`,
+    `humidity`, `windpower` ("≤3" / "4"), `reporttime` and `city`. The trailing
+    「风」 in `windDir` is stripped because `_advice` appends its own unit —
+    otherwise the sentence reads 「西北风4 级」.
+    """
+    item = now_result.get("now") or {}
+    wind_dir = str(item.get("windDir", "") or "")
+    if wind_dir.endswith("风"):
+        wind_dir = wind_dir[:-1]
+
+    return {
+        "city": district or city or province,
+        "province": province,
+        "district": district,
+        "adcode": adcode,
+        "weather": item.get("text", ""),
+        "temperature": item.get("temperature"),
+        "humidity": item.get("humidity"),
+        "winddirection": wind_dir,
+        "windpower": str(item.get("windScale", "") or ""),
+        "reporttime": _reporttime(item.get("obsTime", "")) or now_result.get("updateTime", ""),
+        "feelsLike": item.get("feelsLike"),
+        "visibility": item.get("visibility"),
+        "pressure": item.get("pressure"),
+        "precip": item.get("precip"),
+        "cloud": item.get("cloud"),
+        "obsTime": item.get("obsTime", ""),
+        "source": "qweather",
+    }
 
 
 # ========== 阶段三：按到达时刻取预报（逐层升级） ==========

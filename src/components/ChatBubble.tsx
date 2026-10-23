@@ -65,8 +65,9 @@ function normalizeMarkdown(content: string): string {
 }
 
 export default memo(function ChatBubble({ message }: Props) {
-  const { lang } = useT();
+  const { lang, t } = useT();
   const isUser = message.role === 'user';
+  const meta = message.weatherMeta;
 
   if (!isUser && !message.content) return null;
 
@@ -80,6 +81,20 @@ export default memo(function ChatBubble({ message }: Props) {
           <div className={`${styles.markdown} ${message.streaming ? styles.markdownStreaming : ''}`}>
             <Markdown remarkPlugins={[remarkGfm]}>{normalizeMarkdown(message.content)}</Markdown>
           </div>
+        )}
+        {!isUser && meta && (
+          <span
+            className={`${styles.metaBadge} ${
+              meta.level === 'district' ? styles.metaDistrict : styles.metaCity
+            } ${meta.degraded ? styles.metaDegraded : ''}`}
+            title={`${t('weatherMeta.title')}${meta.displayName ? ` · ${meta.displayName}` : ''}`}
+          >
+            <span className={styles.metaDot} />
+            {t(meta.level === 'district' ? 'weatherMeta.district' : 'weatherMeta.city')}
+            {' · '}
+            {t(meta.provider === 'qweather' ? 'weatherMeta.qweather' : 'weatherMeta.amap')}
+            {meta.degraded && ` · ${t('weatherMeta.degraded')}`}
+          </span>
         )}
         <span className={styles.time}>
           {new Date(message.timestamp).toLocaleTimeString(lang === 'zh' ? 'zh-CN' : 'en-US', { hour: '2-digit', minute: '2-digit' })}

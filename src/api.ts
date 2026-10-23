@@ -15,6 +15,7 @@
 import type {
   Message,
   GeoPoint,
+  WeatherMeta,
   ListConversationsParams,
   ListConversationsResponse,
 } from './types';
@@ -38,6 +39,8 @@ export interface RawSseEvent {
 export interface StreamCallbacks {
   onTextDelta: (delta: string) => void;
   onToolCalled: (toolName: string) => void;
+  /** 阶段五：天气结果的数据精度（区级/市级 + 数据源），用于气泡角标。 */
+  onWeatherMeta?: (meta: WeatherMeta) => void;
   onDone: () => void;
   onError: (err: Error) => void;
   onRawEvent?: (event: RawSseEvent) => void;
@@ -210,6 +213,9 @@ function dispatchSseChunk(part: string, cb: StreamCallbacks, markDone: () => voi
         break;
       case 'tool_called':
         cb.onToolCalled(parsed.tool);
+        break;
+      case 'weather_meta':
+        cb.onWeatherMeta?.(parsed as WeatherMeta);
         break;
       case 'error':
         cb.onError(new Error(parsed.message || 'agent returned error'));

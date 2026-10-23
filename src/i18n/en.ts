@@ -62,6 +62,12 @@ const en = {
   "geo.error.timeout": "⚠️ Location request timed out — retry or type a city instead",
   "geo.error.unsupported": "⚠️ This browser does not support geolocation — please type a city instead",
   "geo.error.unknown": "⚠️ Could not get your location — please type a city instead",
+  "weatherMeta.district": "District",
+  "weatherMeta.city": "City",
+  "weatherMeta.qweather": "QWeather",
+  "weatherMeta.amap": "Amap",
+  "weatherMeta.degraded": "District unavailable, city-level used",
+  "weatherMeta.title": "Precision of the weather data in this answer",
 
   // Aria labels (button hover/screen-reader)
   "aria.send": "Send",

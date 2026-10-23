@@ -387,6 +387,13 @@ function AppInner() {
         }, 1000);
       },
 
+      onWeatherMeta(meta) {
+        // 阶段五：把天气精度挂到当前气泡上，渲染成「区级 · 和风」角标。
+        setMessages(prev =>
+          prev.map(m => (m.id === botMsgIdRef.current ? { ...m, weatherMeta: meta } : m))
+        );
+      },
+
       onRawEvent(event) {
         // Every backend SSE frame flows through here, so this is the cheapest
         // hook for "first byte from backend".

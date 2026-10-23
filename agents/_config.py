@@ -159,6 +159,21 @@ def route_forecast_tolerance_min() -> int:
     return max(FORECAST_TOLERANCE_MIN, min(FORECAST_TOLERANCE_MAX, minutes))
 
 
+# ========== 区县级实况 (阶段五) ==========
+def district_weather_enabled() -> bool:
+    """
+    Whether `get_weather` may use district-level precision (QWeather `now`).
+
+    Unset → **on**. Turning it off restores the stage-4 behaviour exactly
+    (Amap only, city-level when the district lookup fails), which is the safe
+    rollback if the QWeather quota runs low.
+    """
+    value = _raw("DISTRICT_WEATHER_ENABLED").lower()
+    if value in _FALSY:
+        return False
+    return True
+
+
 # ========== Diagnostics ==========
 def mask(secret: str | None) -> str:
     """
@@ -193,6 +208,7 @@ def config_status() -> dict:
         "route_sample_points": route_sample_points(),
         "route_forecast_enabled": route_forecast_enabled(),
         "route_forecast_tolerance_min": route_forecast_tolerance_min(),
+        "district_weather_enabled": district_weather_enabled(),
     }
 
 
