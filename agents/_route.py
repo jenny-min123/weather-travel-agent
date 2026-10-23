@@ -168,13 +168,24 @@ async def resolve_endpoint(text: str, *, allow_default: bool) -> dict:
 
     literal = _as_lonlat(raw)
     if literal:
+        # A coordinate endpoint (浏览器定位 "从我这出发") has no name until we
+        # reverse-geocode it. Naming is cosmetic for routing — the route is built
+        # from the coordinates either way — so a regeo failure must not abort.
+        area: dict = {}
+        try:
+            area = await regeo(f"{literal[0]:.6f},{literal[1]:.6f}")
+        except UpstreamError:
+            area = {}
         return {
             "query": raw,
             "longitude": literal[0],
             "latitude": literal[1],
-            "city": "",
-            "province": "",
-            "adcode": "",
+            "city": area.get("city", ""),
+            "province": area.get("province", ""),
+            "adcode": area.get("adcode", ""),
+            "district": area.get("district", ""),
+            "formatted": area.get("formatted", ""),
+            "resolvedBy": "coordinates",
             "assumedDefaultCity": assumed,
         }
 

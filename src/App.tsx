@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import type {
   Message,
+  GeoPoint,
   ToolLampState,
   ConversationSummary,
 } from './types';
@@ -128,6 +129,15 @@ function AppInner() {
   const hadExistingConversationIdRef = useRef(getExistingConversationId() !== null);
   const conversationIdRef = useRef<string>(activeConversationId);
   const eoUuidRef = useRef<string>(getOrCreateEoUuid());
+  /**
+   * 阶段四：浏览器定位结果。A ref rather than state — `handleSend` reads it at
+   * call time, so a fix acquired a second ago is always the one attached, with
+   * no stale closure and no extra re-render of the message list.
+   */
+  const userLocationRef = useRef<GeoPoint | null>(null);
+  const handleLocationChange = useCallback((fix: GeoPoint | null) => {
+    userLocationRef.current = fix;
+  }, []);
   const initDoneRef = useRef(false);
   const snapshotTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -425,6 +435,8 @@ function AppInner() {
       userId: eoUuidRef.current,
       userMsgId: userMsg.id,
       botMsgId,
+      // 阶段四：定位只随请求体走，不写进 message 文本。
+      userLocation: userLocationRef.current,
     });
 
     abortCtrlRef.current = ctrl;
@@ -601,7 +613,13 @@ function AppInner() {
               </div>
             )}
           </div>
-          <ChatInput onSend={handleSend} onStop={handleStop} onClear={handleClearHistory} disabled={loading} />
+          <ChatInput
+            onSend={handleSend}
+            onStop={handleStop}
+            onClear={handleClearHistory}
+            disabled={loading}
+            onLocationChange={handleLocationChange}
+          />
         </div>
 
         <div className={styles.codePanel}>

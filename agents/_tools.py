@@ -47,6 +47,14 @@ _MAX_HOURS = 24
 _MIN_HOURS = 1
 
 
+_CITY_HELP = (
+    "城市名（如「北京」），或浏览器定位得到的「经度,纬度」字符串"
+    "（GCJ-02 已纠偏，如 \"113.930000,22.530000\"）。"
+    "用户说「我这」「当前位置」「附近」时，若系统提示里有浏览器坐标，就传那串坐标，不要传城市名；"
+    "只有确实没有坐标时才传空字符串 \"\"。"
+)
+
+
 # ========== Shared helpers ==========
 def _resolve_city(city: str | None) -> tuple[str, bool]:
     """
@@ -92,10 +100,7 @@ def _wrap_upstream(tool: str, exc: UpstreamError) -> str:
 # ========== Tool: Get Weather (实况) ==========
 @function_tool
 async def get_weather(
-    city: Annotated[
-        str,
-        "城市名，如「北京」「上海」。若无法确定用户所在城市（如用户只说「我这」「当前位置」），请传空字符串 \"\"。",
-    ] = "",
+    city: Annotated[str, _CITY_HELP] = "",
 ) -> str:
     """查询指定城市的实时天气（温度、天气现象、风向风力、湿度、发布时间）。"""
     tool = "get_weather"
@@ -108,10 +113,15 @@ async def get_weather(
                 "city": query_city,
                 "resolvedCity": live.get("city", ""),
                 "assumedDefaultCity": assumed,
+                "resolvedLocation": live.get("resolvedLocation") or None,
             },
-            current=live,
+            current={k: v for k, v in live.items() if k != "resolvedLocation"},
             source="amap",
-            note="数据来自高德地图实时天气接口 /v3/weather/weatherInfo",
+            note=(
+                "数据来自高德地图实时天气接口 /v3/weather/weatherInfo。"
+                "若 query.resolvedLocation 不为空，说明本次是坐标查询，"
+                "请用其中的 district/city/formatted 说明查的是哪里，不要只报经纬度。"
+            ),
         )
     except UpstreamError as exc:
         return _wrap_upstream(tool, exc)
@@ -122,10 +132,7 @@ async def get_weather(
 # ========== Tool: Get Hourly Forecast (逐小时) ==========
 @function_tool
 async def get_hourly_forecast(
-    city: Annotated[
-        str,
-        "城市名，如「北京」。若无法确定用户所在城市，请传空字符串 \"\"。",
-    ] = "",
+    city: Annotated[str, _CITY_HELP] = "",
     hours: Annotated[int, "需要的小时数，1–24，默认 12。"] = 12,
 ) -> str:
     """查询指定城市未来若干小时的逐小时预报（温度、天气现象、降水概率、降水量的逐时变化）。"""
@@ -166,10 +173,7 @@ async def get_hourly_forecast(
 # ========== Tool: Get Travel Advice (出行建议，含穿衣) ==========
 @function_tool
 async def get_travel_advice(
-    city: Annotated[
-        str,
-        "城市名，如「北京」。若无法确定用户所在城市，请传空字符串 \"\"。",
-    ] = "",
+    city: Annotated[str, _CITY_HELP] = "",
 ) -> str:
     """
     基于实时天气与逐小时预报，给出确定性的出行建议：穿衣、是否带伞、防晒、洗车、户外运动、风力与能见度提醒。
@@ -193,8 +197,9 @@ async def get_travel_advice(
                 "city": query_city,
                 "resolvedCity": live.get("city", ""),
                 "assumedDefaultCity": assumed,
+                "resolvedLocation": live.get("resolvedLocation") or None,
             },
-            current=live,
+            current={k: v for k, v in live.items() if k != "resolvedLocation"},
             hourly={
                 "available": bool(hourly_result.get("available")),
                 "reason": hourly_result.get("reason", ""),
@@ -225,11 +230,12 @@ async def get_travel_advice(
 async def get_route_weather(
     origin: Annotated[
         str,
-        "起点：地名（如「北京南站」）或「经度,纬度」。用户没说从哪里出发时传空字符串 \"\"，系统会用默认城市。",
+        "起点：地名（如「北京南站」）或「经度,纬度」（GCJ-02，浏览器定位可直接用）。"
+        "用户说「从我这出发」且系统提示里有坐标时传那串坐标；都没有才传空字符串 \"\"，系统会用默认城市。",
     ],
     destination: Annotated[
         str,
-        "终点：地名（如「首都机场T3」）或「经度,纬度」。必填。",
+        "终点：地名（如「首都机场T3」）或「经度,纬度」（GCJ-02）。必填。",
     ],
     mode: Annotated[
         str,

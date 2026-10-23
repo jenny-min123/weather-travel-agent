@@ -48,10 +48,26 @@ const en = {
   "sidebar.delete": "Delete conversation",
   "sidebar.deleteConfirm": "Permanently delete this conversation? This cannot be undone.",
 
+  // Geolocation (阶段四)
+  "geo.button": "📍 Use my location",
+  "geo.locating": "Locating…",
+  "geo.retry": "📍 Locate again",
+  "geo.ready": "Located",
+  "geo.clear": "Clear location",
+  "geo.accuracy": "acc.",
+  "geo.hintLocated": "Location saved — it will be attached to the next message. Just ask \"how's the weather here?\".",
+  "geo.error.denied": "⚠️ Location permission denied — please type a city instead",
+  "geo.error.insecure": "⚠️ Geolocation needs https or localhost — please type a city instead",
+  "geo.error.unavailable": "⚠️ Location service unavailable — please type a city instead",
+  "geo.error.timeout": "⚠️ Location request timed out — retry or type a city instead",
+  "geo.error.unsupported": "⚠️ This browser does not support geolocation — please type a city instead",
+  "geo.error.unknown": "⚠️ Could not get your location — please type a city instead",
+
   // Aria labels (button hover/screen-reader)
   "aria.send": "Send",
   "aria.clearHistory": "Clear history",
   "aria.stopGeneration": "Stop generation",
+  "aria.geolocate": "Use my location",
 
   // Language toggle
   "lang.switch": "中文",

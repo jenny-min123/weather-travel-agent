@@ -23,6 +23,7 @@ from openai import AsyncOpenAI
 from openai.types.responses import ResponseTextDeltaEvent
 from agents import Agent, OpenAIChatCompletionsModel, Runner
 
+from .._geo import describe, normalize_user_location, to_gcj02
 from .._logger import create_logger
 from .._tools import (
     get_hourly_forecast,
@@ -86,10 +87,15 @@ agent = Agent(
         "· 如果到达跨天（例如 23:00 出发、次日 01:00 到达），必须写出「次日」，不要让用户误以为是当天。\n"
         "\n"
         "【关于「我这 / 当前位置 / 附近」】\n"
-        "本 Agent 无法获取用户真实地理位置。遇到这类说法时：\n"
-        "  · 不要猜测用户所在城市，也不要编造定位；\n"
-        "  · 调用工具时把 city 参数传为空字符串 \\\"\\\"，系统会自动使用配置的默认城市；\n"
-        "  · 当工具返回 assumedDefaultCity 为 true 时，必须在回复开头明确说明「未获取到你的定位，以下按默认城市（工具返回的 city 字段）给出」，并顺带请用户补充城市以获得更准确结果。\n"
+        "· 如果本轮系统提示里带有「浏览器定位」，说明用户刚刚授权了定位："
+        "调用工具时把 city（或 get_route_weather 的 origin）直接传成提示里给出的那串「经度,纬度」，"
+        "不要传城市名、不要用默认城市，也不要说自己无法定位。"
+        "工具结果里的 query.resolvedLocation 会给出 district / city / formatted，"
+        "用它把位置说清楚，例如「已按你当前所在位置（深圳市南山区）查询」。\n"
+        "· 如果本轮没有「浏览器定位」提示：不要猜测用户所在城市，也不要编造定位；"
+        "调用工具时把 city 参数传为空字符串 \\\"\\\"，系统会自动使用配置的默认城市；"
+        "当工具返回 assumedDefaultCity 为 true 时，必须在回复开头明确说明「未获取到你的定位，以下按默认城市（工具返回的 city 字段）给出」，"
+        "并提示用户可以点输入框左侧的「📍 获取当前位置」按钮授权定位，或者直接说出城市名。\n"
         "\n"
         "【建议类回答的写法】\n"
         "get_travel_advice 返回的 advice 字段由确定性规则引擎生成。你只能对它做语言润色与排序，"
@@ -132,13 +138,18 @@ async def _event_stream(
     message: str,
     session=None,
     cancel_signal: asyncio.Event | None = None,
+    run_agent: Agent | None = None,
 ) -> AsyncGenerator[str, None]:
     """Async generator that yields SSE frames from the agent stream.
 
     Accepts cancel_signal to enable cancellation — when set,
     the loop breaks and the SDK releases its connection.
+
+    `run_agent` lets the caller run a per-request clone of the agent (阶段四 uses
+    it to hand the model a browser coordinate through `instructions`, keeping the
+    conversation history free of injected text).
     """
-    result = Runner.run_streamed(agent, input=message, session=session)
+    result = Runner.run_streamed(run_agent or agent, input=message, session=session)
 
     async for event in result.stream_events():
         # Check cancel between each event
@@ -186,10 +197,38 @@ async def handler(context: Any) -> AsyncGenerator[str, None]:
         raw_user_id = body.get("userId") or body.get("user_id") or ""
     user_id = str(raw_user_id).strip() or None
 
+    # ---------- 阶段四：浏览器定位 ----------
+    # The coordinate arrives as a structured body field (`userLocation`), never as
+    # text pasted into the message:
+    #   * the persisted user message stays exactly what the user typed, so the
+    #     sidebar title and the chat bubble stay clean after a page reload;
+    #   * the hint goes into a *cloned* agent's instructions, so it also never
+    #     enters the SDK session history.
+    # WGS84 → GCJ-02 happens here, once, for the whole downstream chain.
+    location = None
+    run_agent = agent
+    if isinstance(body, dict):
+        location = normalize_user_location(body.get("userLocation"))
+    if location:
+        location = to_gcj02(location)
+        run_agent = agent.clone(
+            instructions=(
+                f"{agent.instructions}\n"
+                "\n【本轮浏览器定位】\n"
+                f"用户已在浏览器中授权定位，当前坐标为 {describe(location)}（GCJ-02 已纠偏）。\n"
+                "当用户说「我这 / 当前位置 / 附近」，或者没有指明城市时，"
+                f"把工具的 city 参数（get_route_weather 则是 origin）直接传 \"{location['lon']:.6f},{location['lat']:.6f}\"，"
+                "不要使用默认城市，也不要说无法定位。\n"
+            )
+        )
+
     # Session for memory persistence
     cid = context.conversation_id
 
-    logger.log(f"[request] cid={cid}, uid={user_id or '-'}, message={message[:50]!r}")
+    logger.log(
+        f"[request] cid={cid}, uid={user_id or '-'}, message={message[:50]!r}, "
+        f"userLocation={describe(location) if location else '-'}"
+    )
 
     # Write a user-indexed copy of the user message ONLY on the first turn of
     # this conversation, so /conversations (which scans the
@@ -272,7 +311,7 @@ async def handler(context: Any) -> AsyncGenerator[str, None]:
     stopped = False
 
     try:
-        async for frame in _event_stream(message, session, cancel_signal):
+        async for frame in _event_stream(message, session, cancel_signal, run_agent=run_agent):
             if cancel_signal.is_set():
                 stopped = True
                 break

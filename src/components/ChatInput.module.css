@@ -177,3 +177,160 @@
   letter-spacing: .04em;
   text-align: center;
 }
+
+/* ── 阶段四：定位按钮（4 态：idle / locating / ready / error） ────────── */
+.geoBtn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--bg-border);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  letter-spacing: .02em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color var(--transition-fast),
+    border-color var(--transition-fast),
+    background var(--transition-fast);
+}
+.geoBtn:hover:not(:disabled) {
+  color: var(--accent-gold);
+  border-color: var(--accent-gold);
+  background: var(--accent-gold-dim);
+}
+.geoBtn:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+/* locating：不给重复点击的机会 */
+.geoBtnBusy {
+  color: var(--accent-gold);
+  border-color: var(--accent-gold);
+  background: var(--accent-gold-dim);
+  cursor: progress;
+}
+/* ready：绿边 + 绿字，一眼看出「已拿到位置」 */
+.geoBtnReady {
+  color: #2ecc71;
+  border-color: rgba(46, 204, 113, .55);
+  background: rgba(46, 204, 113, .1);
+}
+.geoBtnReady:hover:not(:disabled) {
+  color: #55efc4;
+  border-color: #2ecc71;
+  background: rgba(46, 204, 113, .16);
+}
+/* error：红边 + 右上角红点 */
+.geoBtnError {
+  color: #e74c3c;
+  border-color: rgba(231, 76, 60, .6);
+  background: rgba(231, 76, 60, .1);
+}
+.geoBtnError:hover:not(:disabled) {
+  color: #ff7675;
+  border-color: #e74c3c;
+  background: rgba(231, 76, 60, .18);
+}
+.geoBtnBusy .geoPin { animation: geoPulse 1.2s ease-in-out infinite; }
+.geoPin { font-size: .78rem; line-height: 1; }
+.geoLabel { line-height: 1; }
+
+/* 未授权时的红点，答辩演示用 */
+.geoDot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e74c3c;
+  box-shadow: 0 0 0 2px var(--bg-elevated), 0 0 8px rgba(231, 76, 60, .8);
+  animation: geoDotBlink 1.4s ease-in-out infinite;
+}
+
+/* 定位中：转圈（纯 CSS，无图标依赖） */
+.geoSpinner {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(240, 192, 96, .35);
+  border-top-color: var(--accent-gold);
+  animation: geoSpin .7s linear infinite;
+}
+
+/* 成功后的坐标 chip */
+.geoChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(46, 204, 113, .5);
+  background: rgba(46, 204, 113, .12);
+  color: #55efc4;
+  font-family: var(--font-mono);
+  font-size: .64rem;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+.geoChipPin { font-size: .7rem; line-height: 1; }
+.geoChipText { line-height: 1; }
+.geoChipClear {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font-size: .8rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: .7;
+  transition: background var(--transition-fast), opacity var(--transition-fast);
+}
+.geoChipClear:hover {
+  opacity: 1;
+  background: rgba(46, 204, 113, .25);
+}
+
+/* 授权失败提示：与输入区同宽，红色，屏读器会读出来 */
+.geoError {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(231, 76, 60, .45);
+  background: rgba(231, 76, 60, .1);
+  color: #ff8a80;
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  line-height: 1.5;
+}
+.geoHint {
+  margin: 0;
+  padding-left: 2px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: .62rem;
+  letter-spacing: .02em;
+}
+
+@keyframes geoSpin {
+  to { transform: rotate(360deg); }
+}
+@keyframes geoPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .45; }
+}
+@keyframes geoDotBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .35; }
+}

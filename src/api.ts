@@ -14,6 +14,7 @@
 
 import type {
   Message,
+  GeoPoint,
   ListConversationsParams,
   ListConversationsResponse,
 } from './types';
@@ -89,7 +90,18 @@ export function sendMessageStream(
   message: string,
   callbacks: StreamCallbacks,
   conversationId?: string,
-  options?: { userId?: string; userMsgId?: string; botMsgId?: string },
+  options?: {
+    userId?: string;
+    userMsgId?: string;
+    botMsgId?: string;
+    /**
+     * Browser position fix, sent as a structured field rather than pasted into
+     * the message text so the stored conversation stays exactly what the user
+     * typed. `null`/undefined means "no location" — the backend then falls back
+     * to DEFAULT_CITY and flags `assumedDefaultCity`.
+     */
+    userLocation?: GeoPoint | null;
+  },
 ): AbortController {
   const ctrl = new AbortController();
 
@@ -113,6 +125,8 @@ export function sendMessageStream(
           userId: options?.userId,
           userMsgId: options?.userMsgId,
           botMsgId: options?.botMsgId,
+          // 阶段四：结构化定位字段，不污染 message 文本与历史记录。
+          userLocation: options?.userLocation ?? undefined,
         }),
         signal: ctrl.signal,
       });

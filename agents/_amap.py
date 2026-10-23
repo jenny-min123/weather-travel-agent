@@ -36,6 +36,7 @@ from typing import Any
 import httpx
 
 from ._config import amap_route_key, amap_weather_key
+from ._geo import format_coords, parse_coords
 
 AMAP_BASE = "https://restapi.amap.com"
 URL_WEATHER = f"{AMAP_BASE}/v3/weather/weatherInfo"
@@ -205,35 +206,92 @@ def _normalize_live(item: dict) -> dict:
     }
 
 
+async def _resolve_adcode(location: str) -> dict:
+    """
+    `"lon,lat"` (GCJ-02) → administrative area, ready to feed the weather API.
+
+    Kept private: this exists only because `/v3/weather/weatherInfo` refuses
+    coordinates. It answers `status=1, info=OK` with an **empty `lives[]`** for a
+    coordinate `city` — a silent failure that looks like "no such city" — so the
+    coordinate must be converted to an adcode before the request.
+    """
+    try:
+        area = await regeo(location)
+    except UpstreamError as exc:
+        raise UpstreamError(
+            "LOCATION_UNRESOLVED",
+            f"无法根据坐标「{location}」定位行政区（{exc.message}）",
+        ) from exc
+
+    # District first: for a GPS fix it is strictly more precise than the city,
+    # and 直辖市 (北京/上海/重庆/天津) often report an empty `city` field.
+    for field in ("adcode", "district", "city", "province"):
+        if area.get(field):
+            area["resolvedBy"] = field
+            return area
+
+    raise UpstreamError(
+        "LOCATION_UNRESOLVED",
+        f"坐标「{location}」不在任何行政区范围内（可能位于境外或海上）",
+    )
+
+
 async def weather_live(city: str) -> dict:
     """
     Current conditions for `city` via `/v3/weather/weatherInfo?extensions=base`.
 
-    `city` accepts a name ("北京"), an adcode ("110000"), or "lon,lat".
-    Returns the normalized dict described in `_normalize_live`.
+    `city` accepts a city name ("北京"), an adcode ("110000"), or **"lon,lat" in
+    GCJ-02**. Coordinates are not understood by the weather endpoint itself — it
+    returns `status=1` with an empty `lives[]` — so they are reverse-geocoded to
+    an adcode first (see `_resolve_adcode`).
+
+    When the query was a coordinate, the result carries an extra
+    `resolvedLocation` block (district / city / formatted address) so the answer
+    can name the place instead of echoing a pair of numbers.
     """
-    city = (city or "").strip()
-    if not city:
+    query = (city or "").strip()
+    if not query:
         raise UpstreamError("MISSING_CITY", "未提供城市名")
 
     key = amap_weather_key()
     if not key:
         raise UpstreamError("MISSING_KEY", "未配置 AMAP_WEATHER_API_KEY")
 
+    point = parse_coords(query)
+    resolved: dict | None = None
+    if point:
+        resolved = await _resolve_adcode(format_coords(*point))
+        query = str(resolved.get("adcode") or resolved.get("district") or resolved.get("city"))
+
     payload = await _get_json(
         URL_WEATHER,
-        {"key": key, "city": city, "extensions": "base", "output": "JSON"},
+        {"key": key, "city": query, "extensions": "base", "output": "JSON"},
     )
     _require_ok(payload, what="实况天气查询")
 
     lives = payload.get("lives") or []
     if not lives:
-        raise UpstreamError(
-            "EMPTY_LIVES",
-            f"高德未返回「{city}」的实况数据（请检查城市名是否为地级市及以上）",
+        hint = (
+            "坐标已解析为「{0}」，但高德仍无该区县的实况数据".format(resolved.get("formatted") or query)
+            if resolved
+            else f"请检查「{query}」是否为地级市及以上"
         )
+        raise UpstreamError("EMPTY_LIVES", f"高德未返回实况数据（{hint}）")
 
-    return _normalize_live(lives[0])
+    live = _normalize_live(lives[0])
+    if resolved:
+        live["resolvedLocation"] = {
+            "longitude": point[0] if point else None,
+            "latitude": point[1] if point else None,
+            "adcode": resolved.get("adcode", ""),
+            "province": resolved.get("province", ""),
+            "city": resolved.get("city", ""),
+            "district": resolved.get("district", ""),
+            "township": resolved.get("township", ""),
+            "formatted": resolved.get("formatted", ""),
+            "resolvedBy": resolved.get("resolvedBy", ""),
+        }
+    return live
 
 
 async def weather_forecast(city: str) -> dict:

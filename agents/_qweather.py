@@ -37,8 +37,9 @@ from typing import Any
 
 import httpx
 
-from ._amap import UpstreamError, geocode
+from ._amap import UpstreamError, geocode, regeo
 from ._config import qweather_base_url, qweather_key, qweather_host
+from ._geo import format_coords, parse_coords
 from ._timealign import (
     forecast_to_live,
     nearest_date,
@@ -177,6 +178,34 @@ async def resolve_location(city: str) -> dict:
     cached = _cache_get(_loc_cache, city)
     if cached is not None:
         return cached
+
+    # Path 0 — the caller already handed us a coordinate (浏览器定位).
+    # QWeather accepts "lng,lat"/"lon,lat" directly (two decimals at most), so no
+    # city lookup is needed. A reverse-geocode is still attempted, purely to give
+    # the answer a human-readable district name; failure leaves the name empty and
+    # the coordinate query goes ahead regardless.
+    point = parse_coords(city)
+    if point:
+        name = ""
+        adm1 = adm2 = ""
+        try:
+            area = await regeo(format_coords(*point))
+            name = area.get("district") or area.get("city") or area.get("province") or ""
+            adm1 = area.get("province", "")
+            adm2 = area.get("city", "")
+        except UpstreamError:
+            pass
+        resolved = {
+            "location": f"{point[0]:.2f},{point[1]:.2f}",
+            "name": name,
+            "adm1": adm1,
+            "adm2": adm2,
+            "latitude": point[1],
+            "longitude": point[0],
+            "resolvedBy": "coordinates",
+        }
+        _cache_put(_loc_cache, city, resolved)
+        return resolved
 
     base = qweather_base_url()
     key = qweather_key()

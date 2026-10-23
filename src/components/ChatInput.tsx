@@ -1,5 +1,8 @@
-import { useState, useRef, useCallback, KeyboardEvent } from 'react';
+import { useState, useRef, useCallback, useEffect, KeyboardEvent } from 'react';
 import { useT, MessageKeys } from '../i18n';
+import { clearCachedFix, geoErrorKey, geolocationSupported, getBrowserPosition, loadCachedFix } from '../lib/geo';
+import type { GeoFailure } from '../lib/geo';
+import type { GeoPoint } from '../types';
 import styles from './ChatInput.module.css';
 
 interface Props {
@@ -7,14 +10,74 @@ interface Props {
   onStop: () => void;
   onClear: () => void;
   disabled: boolean;
+  /**
+   * Called whenever the browser fix changes (acquired or cleared). The parent
+   * attaches the current value to the next /chat request — and to nothing else,
+   * so a fix never leaks into the message text.
+   */
+  onLocationChange?: (fix: GeoPoint | null) => void;
 }
 
 const PRESET_KEYS = ['preset.1', 'preset.2'] as const;
 
-export default function ChatInput({ onSend, onStop, onClear, disabled }: Props) {
+type GeoStatus = 'idle' | 'locating' | 'ready' | 'error';
+
+export default function ChatInput({ onSend, onStop, onClear, disabled, onLocationChange }: Props) {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { t } = useT();
+
+  // --- 阶段四：浏览器定位 ---
+  // Four explicit states so the UI can be reasoned about (and demoed):
+  //   idle     → button invites a click
+  //   locating → spinner, button disabled, no double requests
+  //   ready    → coordinates chip + "重新定位"
+  //   error    → red dot, red border, one-line explanation under the bar
+  const [geoStatus, setGeoStatus] = useState<GeoStatus>('idle');
+  const [fix, setFix] = useState<GeoPoint | null>(null);
+  const [geoError, setGeoError] = useState<MessageKeys | null>(null);
+  const [geoSupported, setGeoSupported] = useState(true);
+
+  // Reuse a recent fix after a page refresh (9-minute TTL in lib/geo.ts) so the
+  // user does not have to re-authorise for every reload.
+  useEffect(() => {
+    setGeoSupported(geolocationSupported());
+    const cached = loadCachedFix();
+    if (cached) {
+      setFix(cached);
+      setGeoStatus('ready');
+      onLocationChange?.(cached);
+    }
+    // Runs once on mount — onLocationChange is a stable callback from App.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleLocate = useCallback(async () => {
+    if (geoStatus === 'locating' || disabled) return;
+    setGeoStatus('locating');
+    setGeoError(null);
+    try {
+      const next = await getBrowserPosition();
+      setFix(next);
+      setGeoStatus('ready');
+      onLocationChange?.(next);
+    } catch (err) {
+      const failure = err as GeoFailure;
+      // A failed re-locate must not keep sending stale coordinates.
+      setFix(null);
+      setGeoStatus('error');
+      setGeoError(geoErrorKey(failure?.code ?? 'unknown'));
+      onLocationChange?.(null);
+    }
+  }, [geoStatus, disabled, onLocationChange]);
+
+  const handleClearLocation = useCallback(() => {
+    clearCachedFix();
+    setFix(null);
+    setGeoError(null);
+    setGeoStatus('idle');
+    onLocationChange?.(null);
+  }, [onLocationChange]);
 
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
@@ -45,9 +108,63 @@ export default function ChatInput({ onSend, onStop, onClear, disabled }: Props) 
     onSend(text);
   };
 
+  const geoLabel =
+    geoStatus === 'locating'
+      ? t('geo.locating')
+      : geoStatus === 'ready'
+        ? t('geo.retry')
+        : geoStatus === 'error'
+          ? t('geo.retry')
+          : t('geo.button');
+
+  const coordsTitle = fix ? `${fix.lon}, ${fix.lat}` : undefined;
+
   return (
     <div className={styles.bar}>
       <div className={styles.presets}>
+        {geoSupported && (
+          <button
+            type="button"
+            className={[
+              styles.geoBtn,
+              geoStatus === 'ready' ? styles.geoBtnReady : '',
+              geoStatus === 'error' ? styles.geoBtnError : '',
+              geoStatus === 'locating' ? styles.geoBtnBusy : '',
+            ].join(' ')}
+            onClick={handleLocate}
+            disabled={disabled || geoStatus === 'locating'}
+            aria-label={t('aria.geolocate')}
+            title={geoStatus === 'error' && geoError ? t(geoError) : coordsTitle || t('aria.geolocate')}
+          >
+            {geoStatus === 'locating' ? (
+              <span className={styles.geoSpinner} aria-hidden="true" />
+            ) : (
+              <span className={styles.geoPin} aria-hidden="true">📍</span>
+            )}
+            <span className={styles.geoLabel}>{geoLabel}</span>
+            {geoStatus === 'error' && <span className={styles.geoDot} aria-hidden="true" />}
+          </button>
+        )}
+
+        {geoStatus === 'ready' && fix && (
+          <span className={styles.geoChip} title={coordsTitle}>
+            <span className={styles.geoChipPin} aria-hidden="true">✓</span>
+            <span className={styles.geoChipText}>
+              {t('geo.ready')}
+              {typeof fix.accuracy === 'number' ? ` · ${t('geo.accuracy')} ±${fix.accuracy}m` : ''}
+            </span>
+            <button
+              type="button"
+              className={styles.geoChipClear}
+              onClick={handleClearLocation}
+              aria-label={t('geo.clear')}
+              title={t('geo.clear')}
+            >
+              ×
+            </button>
+          </span>
+        )}
+
         {PRESET_KEYS.map(key => (
           <button
             key={key}
@@ -59,6 +176,17 @@ export default function ChatInput({ onSend, onStop, onClear, disabled }: Props) 
           </button>
         ))}
       </div>
+
+      {geoStatus === 'error' && geoError && (
+        <p className={styles.geoError} role="alert" aria-live="polite">
+          {t(geoError)}
+        </p>
+      )}
+      {geoStatus === 'ready' && fix && (
+        <p className={styles.geoHint} aria-live="polite">
+          {t('geo.hintLocated')}
+        </p>
+      )}
 
       <div className={`${styles.inputWrap} ${disabled ? styles.inputDisabled : ''}`}>
         <textarea

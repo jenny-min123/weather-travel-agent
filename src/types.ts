@@ -21,6 +21,22 @@ export interface ToolLampState {
 }
 
 /**
+ * One browser position fix (阶段四).
+ *
+ * `coordSys` is always 'wgs84' here — the browser's datum. The backend converts
+ * it to GCJ-02 once (`agents/_geo.py`) before any Amap call.
+ */
+export interface GeoPoint {
+  lon: number;
+  lat: number;
+  /** Horizontal accuracy in metres, as reported by the browser. */
+  accuracy?: number;
+  coordSys: 'wgs84';
+  /** Epoch ms when the fix was taken (used for the client-side cache TTL). */
+  ts: number;
+}
+
+/**
  * Lightweight summary of a conversation, returned by /conversations.
  * Used to render the left sidebar — does NOT contain full message content.
  */

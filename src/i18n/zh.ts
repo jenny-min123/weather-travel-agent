@@ -48,10 +48,26 @@ const zh = {
   "sidebar.delete": "删除会话",
   "sidebar.deleteConfirm": "确定要永久删除这个会话吗？此操作不可恢复。",
 
+  // Geolocation (阶段四)
+  "geo.button": "📍 获取当前位置",
+  "geo.locating": "定位中…",
+  "geo.retry": "📍 重新定位",
+  "geo.ready": "已定位",
+  "geo.clear": "清除定位",
+  "geo.accuracy": "精度",
+  "geo.hintLocated": "已获取定位：发消息时会自动带上这个位置，问「我这天气」即可。",
+  "geo.error.denied": "⚠️ 未获取到定位权限，请手动输入城市",
+  "geo.error.insecure": "⚠️ 当前页面不是 https / localhost，浏览器已禁用定位，请手动输入城市",
+  "geo.error.unavailable": "⚠️ 定位服务不可用，请手动输入城市",
+  "geo.error.timeout": "⚠️ 定位超时，请重试或手动输入城市",
+  "geo.error.unsupported": "⚠️ 当前浏览器不支持定位，请手动输入城市",
+  "geo.error.unknown": "⚠️ 定位失败，请手动输入城市",
+
   // Aria labels (button hover/screen-reader)
   "aria.send": "发送",
   "aria.clearHistory": "清除历史",
   "aria.stopGeneration": "停止生成",
+  "aria.geolocate": "获取当前位置",
 
   // Language toggle
   "lang.switch": "English",
